@@ -1,0 +1,179 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+> Adapted from Federico Abascal's practical
+
+# Detection of drivers in bladder carcinoma
+
+We will be working with a dataset of bladder cancer from the TCGA
+consortium.
+
+## Generating the input ﬁle
+
+dndscv works with an input ﬁle that consist of 5 columns. 1) Sample ID
+2) Chromosome 3) Position 4) Reference 5) Mutation
+
+We can extract this data from MAF ﬁles columns:
+
+1.  Tumor_Sample_Barcode
+2.  Chromosome
+3.  Start_Position
+4.  Reference_Allele
+5.  Tumor_Seq_Allele2
+
+The input ﬁle can also be generated from vcf ﬁles using the following
+columns:
+
+1.  Tumor column (column number can diﬀer based on the tool used to
+    generate the vcf ﬁle)
+2.  Chrom
+3.  POS
+4.  REF
+5.  ALT
+
+For this practical we have already prepared an input ﬁle for you
+TCGA-BLCA.5col. However, in your own work, you will have to typically
+generate this input ﬁle on your own. The easiest way to structure this
+input is by converting your variant calling output (.vcf formatted ﬁle)
+to .maf format. (See earlier discussion on the topic)
+
+## Data loading and exploration
+
+Once we have an appropriately formatted 5 column input ﬁle with a
+suitable header we should load the data and explore it to ensure that
+the data are what we expect them to be and to check for any unexpected
+errors.
+
+### Load the input ﬁle
+
+```{r}
+library(dndscv)
+
+setwd("~/Downloads/Bioinformatica_Avanzada/mutational_signatures/BLCA-mutational-signatures-2")
+
+muts = read.table("example_BLCA/TCGA-BLCA.5col", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+head(muts)
+```
+
+To count the number of samples we can run the next command
+
+```{r}
+length(unique(muts$sampleID))
+```
+
+and to get the number of mutations:
+
+```{r}
+nrow(muts)
+```
+
+There are $370$ donors and $53518$ mutations. To see the mutational
+burden per sample we can run the following:
+
+```{r}
+barplot(sort(table(muts$sampleID)), ylab = "Number of mutations", xlab = "Donors",  las = 2, names.arg = "")
+```
+
+### Are there any hypermutators in the cohort?
+
+> *It is relevant to explore our data in this way because hypermutators
+> can have a negative impact on the statistical power to detect drivers
+> and because some hypermutators (e.g. POLE mutant tumors) are under
+> mutational processes not properly modeled by a
+> trinucleotide-substitution model. Although there is no exact deﬁnition
+> of a hypermutator, usually having more than 500 mutations in the exome
+> (approximately 5.6810\^{4} mutations in the whole genome) can be
+> considered a hypermutator. In general, it is good to exclude these
+> samples from this analysis.*
+
+```{r}
+donor_muts = table(muts$sampleID)
+(hypmutated = donor_muts[donor_muts > 500])
+```
+
+
+The donors TCGA-G2-A3VY, TCGA-G2-AA3B and TCGA-ZF-AA4V are hypermutated.
+
+## Driver detection
+
+We will run dndscv to detect driver genes in bladder cancer removing hypermutators (n>500)
+
+```{r}
+BLCA_dndscv = dndscv(muts, max_muts_per_gene_per_sample = 3, max_coding_muts_per_sample = 500, outmats = TRUE)
+```
+
+While running dndscv you will se some warnings. One of them reads "Same mutations observed in
+diﬀerent sampleIDs. Please verify that these are independent events and remove duplicates otherwise."
+This warning relates to that only unique mutations are listed in the input ﬁle. For example if your input
+contains the same mutation in several related samples (samples that come from the same tumor) they
+should only be listed once in the ﬁle.
+You will also see a warning indicating that some mutations have a wrong reference. This is because of a
+error in the original TCGA ﬁle. We can ignore this as the number of aﬀected bases is very small
+
+### Looking at the output
+
+dndscv generates a list of objects as output. You can look at the contents of the list like this:
+
+```{r}
+names(BLCA_dndscv)
+```
+
+The most relevant output often is **sel_cv** as it contains the results of the neutrality tests at gene level.
+The **globaldnds** output has a table with global MLEs for the dN/dS ratios across all genes and their
+conﬁdence intervals. The **annotmuts** output contains a table with annotated coding mutations. **genemuts**
+has a table with observed and expected number of mutations per gene.
+
+### Table of significant genes
+
+**BLCA_dndscv$sel_cv** contains the results for all the analyzed genes.
+
+We can look at the significant genes in the table by filtering for genes with a **qglobla_cv < 0.1**. **qglobal** is the multiple hypothesis correction q-value for the **pglobal_cv** (the combined p-value for the different p-values calculated).
+
+```{r}
+(driver_genes_BLCA = BLCA_dndscv$sel_cv[which(BLCA_dndscv$sel_cv$qglobal_cv < 0.1),])
+```
+
+#### How many significant genes do you find?
+
+```{r}
+nrow(driver_genes_BLCA)
+```
+
+There are 33 significant genes.
+
+#### Is there any gene under negative selection?
+
+In this list there aren't. This is because in all genes at least one type of mutation is present in a much higher rate than that expected under neutrality. In negative selection we would be expecting to see genes that can't be mutated for the sake of the cancer cell survival, and thus the mutation rate should be close to 0. There aren't any genes that follow these conditions.
+
+#### Which genes are oncogenes? Which genes are tummor suppresors?
+
+> *Tip: look at the number and types of mutations n_syn, n_mis, ...*
+
+```{r}
+sup_genes = c()
+onc_genes = c()
+  
+for ( gene in 1:nrow(driver_genes_BLCA)) {
+  
+  sup_score = driver_genes_BLCA[gene,]$wnon_cv + driver_genes_BLCA[gene,]$wspl_cv 
+  onc_score = driver_genes_BLCA[gene,]$wmis_cv
+  
+  if (sup_score > onc_score){
+    sup_genes = c(sup_genes, driver_genes_BLCA[gene,]$gene_name)
+  } else {
+    onc_genes = c(onc_genes, driver_genes_BLCA[gene,]$gene_name)
+  }
+  
+}
+
+cat("These are tummor suppresors: ", sup_genes, "\n")
+cat("These are oncogenes: ", onc_genes)
+```
+
