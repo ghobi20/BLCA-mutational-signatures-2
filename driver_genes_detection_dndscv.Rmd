@@ -98,43 +98,52 @@ donor_muts = table(muts$sampleID)
 (hypmutated = donor_muts[donor_muts > 500])
 ```
 
-
 The donors TCGA-G2-A3VY, TCGA-G2-AA3B and TCGA-ZF-AA4V are hypermutated.
 
 ## Driver detection
 
-We will run dndscv to detect driver genes in bladder cancer removing hypermutators (n>500)
+We will run dndscv to detect driver genes in bladder cancer removing
+hypermutators (n\>500)
 
 ```{r}
 BLCA_dndscv = dndscv(muts, max_muts_per_gene_per_sample = 3, max_coding_muts_per_sample = 500, outmats = TRUE)
 ```
 
-While running dndscv you will se some warnings. One of them reads "Same mutations observed in
-diﬀerent sampleIDs. Please verify that these are independent events and remove duplicates otherwise."
-This warning relates to that only unique mutations are listed in the input ﬁle. For example if your input
-contains the same mutation in several related samples (samples that come from the same tumor) they
-should only be listed once in the ﬁle.
-You will also see a warning indicating that some mutations have a wrong reference. This is because of a
-error in the original TCGA ﬁle. We can ignore this as the number of aﬀected bases is very small
+While running dndscv you will se some warnings. One of them reads "Same
+mutations observed in diﬀerent sampleIDs. Please verify that these are
+independent events and remove duplicates otherwise." This warning
+relates to that only unique mutations are listed in the input ﬁle. For
+example if your input contains the same mutation in several related
+samples (samples that come from the same tumor) they should only be
+listed once in the ﬁle. You will also see a warning indicating that some
+mutations have a wrong reference. This is because of a error in the
+original TCGA ﬁle. We can ignore this as the number of aﬀected bases is
+very small
 
 ### Looking at the output
 
-dndscv generates a list of objects as output. You can look at the contents of the list like this:
+dndscv generates a list of objects as output. You can look at the
+contents of the list like this:
 
 ```{r}
 names(BLCA_dndscv)
 ```
 
-The most relevant output often is **sel_cv** as it contains the results of the neutrality tests at gene level.
-The **globaldnds** output has a table with global MLEs for the dN/dS ratios across all genes and their
-conﬁdence intervals. The **annotmuts** output contains a table with annotated coding mutations. **genemuts**
-has a table with observed and expected number of mutations per gene.
+The most relevant output often is **sel_cv** as it contains the results
+of the neutrality tests at gene level. The **globaldnds** output has a
+table with global MLEs for the dN/dS ratios across all genes and their
+conﬁdence intervals. The **annotmuts** output contains a table with
+annotated coding mutations. **genemuts** has a table with observed and
+expected number of mutations per gene.
 
 ### Table of significant genes
 
-**BLCA_dndscv$sel_cv** contains the results for all the analyzed genes.
+**BLCA_dndscv\$sel_cv** contains the results for all the analyzed genes.
 
-We can look at the significant genes in the table by filtering for genes with a **qglobla_cv < 0.1**. **qglobal** is the multiple hypothesis correction q-value for the **pglobal_cv** (the combined p-value for the different p-values calculated).
+We can look at the significant genes in the table by filtering for genes
+with a **qglobla_cv \< 0.1**. **qglobal** is the multiple hypothesis
+correction q-value for the **pglobal_cv** (the combined p-value for the
+different p-values calculated).
 
 ```{r}
 (driver_genes_BLCA = BLCA_dndscv$sel_cv[which(BLCA_dndscv$sel_cv$qglobal_cv < 0.1),])
@@ -150,7 +159,12 @@ There are 33 significant genes.
 
 #### Is there any gene under negative selection?
 
-In this list there aren't. This is because in all genes at least one type of mutation is present in a much higher rate than that expected under neutrality. In negative selection we would be expecting to see genes that can't be mutated for the sake of the cancer cell survival, and thus the mutation rate should be close to 0. There aren't any genes that follow these conditions.
+In this list there aren't. This is because in all genes at least one
+type of mutation is present in a much higher rate than that expected
+under neutrality. In negative selection we would be expecting to see
+genes that can't be mutated for the sake of the cancer cell survival,
+and thus the mutation rate should be close to 0. There aren't any genes
+that follow these conditions.
 
 #### Which genes are oncogenes? Which genes are tummor suppresors?
 
@@ -175,5 +189,87 @@ for ( gene in 1:nrow(driver_genes_BLCA)) {
 
 cat("These are tummor suppresors: ", sup_genes, "\n")
 cat("These are oncogenes: ", onc_genes)
+```
+
+#### Considering the coefficient of selection for missense mutations in ARID1A how many missense mutations had been selected for this cohort?
+
+> Tip: the coeﬃcient wmis_cvis 4.4825244 and there are 21 missense
+> mutations in ARID1A. Tip 2: (w-1)/w gives the proportion under
+> positive selection. Tip 3: 95% conﬁdence intervals for the selection
+> coeﬃcients can be obtained with **geneci(dout,gene_list="ARID1A")**
+> Tip 4: Have a look at genemuts to see how many mutations were
+> expected\*
+
+```{r}
+BLCA_dndscv$genemuts[which(BLCA_dndscv$genemuts$gene_name=="ARID1A"),]
+geneci(BLCA_dndscv, gene_list = "ARID1A")
+```
+
+```{r}
+# The number of missense mutations used to get the value of wmis_cvis is the number of obersved missense mutations minus the expected number of missense mutations under neutrality.
+
+(selec_miss = BLCA_dndscv$genemuts[which(BLCA_dndscv$genemuts$gene_name=="ARID1A"),]$n_mis - BLCA_dndscv$genemuts[which(BLCA_dndscv$genemuts$gene_name=="ARID1A"),]$exp_mis)
+```
+
+Around 15-16 missense mutations were used in this cohort to estimate its
+coefficient of selection
+
+#### Are all of those mutations under selection?
+
+No, not all of them are under selection, because the model already
+expected to have 5-6 missense mutations assuming neutrality towards
+cancer.
+
+Let's take a look at the mutations in *PIK3CA*:
+
+```{r}
+BLCA_dndscv$annotmuts[which(BLCA_dndscv$annotmuts$gene=="PIK3CA"),]
+```
+
+Look at the aachange column to see the amino acid changes generated by
+the mutations.
+
+#### Is there any recurrent mutation (hotspot)?
+
+```{r}
+table(BLCA_dndscv$annotmuts[which(BLCA_dndscv$annotmuts$gene=="PIK3CA"),]$aachange)
+```
+
+Yes, there are two recurring missense mutations or hotspots, E545K and
+E542K.
+
+### Global signs of selection
+
+dndscv also estimates global dN/dS ratios in aggregate for all the
+genes. You can access this data in the dndscv output.
+
+```{r}
+print(BLCA_dndscv$globaldnds)
+```
+
+wspl is lower than 1. That could mean negative selection but this result
+is often obtained with exome data because of the poorer sequencing
+coverage at splice sites. **dndscv** interprets the depletion of mutations at splice sites as negative selection.
+
+However all the other coeﬃcients are \> 1 and their 95% conﬁdence
+intervals too.
+
+We can use the **globaldnds** information to estimate the number of
+missense driver mutations per sample.
+
+-   There are 30610 missense mutations in the cohor, and the coefficient
+    of selection **wmis** is 1.0524248.
+-   Calculate the proportion of missense mutations under positive selection using the formula **(w-1)/w**.
+- Find out the actual number of missense mutations under positive selection $n_mis * (w-1)/w$.
+- Calculate the average per sample: $( n_mis * (w-1)/w ) / num_samples$.
+You can obtain all the info with:
+
+```{r}
+w = BLCA_dndscv$globaldnds[1,2]
+n_mis = length(which(BLCA_dndscv$annotmuts$impact=="Missense"))
+(num_samples = length(unique(muts$sampleID)))
+
+#Proportion of missense mutations under positive selection
+pos_sel_mis = (w - 1)/w
 ```
 
